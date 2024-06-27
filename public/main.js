@@ -319,10 +319,9 @@ function onMouseMove (e) {
 }
 
 socket.on('turnPlayer', function(cur_id) {
-  if (cur_id === playerID) {
+  if (cur_id === socket.id) {
     turn = true;
     console.log('<< Your turn');
-
     turnmsg = "Your turn"
   } else {
     turn = false;
@@ -483,8 +482,7 @@ function dialog(text) {
 function arrangeHand(){
   let ccards = []
   for (let i = 0; i < 4; i++){
-    ccards = ccards.concat(hand.filter(card => ((card%14)!==13 && (card >= i*14) && (card < (i+1)*14))).sort((a, b) => a - b))
-    ccards = ccards.concat(hand.filter(card => ((card%14)!==13 && (card >= (i+4)*14) && (card < (i+5)*14))).sort((a, b) => a - b))
+    ccards = ccards.concat(hand.filter(card => ((card%14)!==13 && (card >= (i+4)*14) && (card < (i+5)*14))||((card%14)!==13 && (card >= i*14) && (card < (i+1)*14))).sort((a, b) => a%56 - b%56))
   }
   let wcards = hand.filter(card => (card%14)===13).sort((a, b) => a - b);
   hand = ccards.concat(wcards)
@@ -546,6 +544,16 @@ function shadoWrapper(color, intensity, blur, func){
   func()
 
   ctx.restore();
+}
+
+function rotateWrapperForDrawCard(degrees, func){
+
+  ctx.save()
+  ctx.translate(3*canvas.width/4, canvas.height/2);//Drawcard exclusive part
+  ctx.rotate(degrees*Math.PI/180);
+  func()
+  ctx.restore();
+
 }
 
 // function drawImageWithBorder(img, sx, sy, sw, sh, dx, dy, dw, dh, bordercolor, intensity, blur){
@@ -623,14 +631,18 @@ function animate(){
         }
     } else if((mode == 'play' || mode == 'colorpick') && ingame){
       game_broadcast()
-      const width = 800;
-      const height = 250;
-      ctx.clearRect(canvas.width/2 - width/2, canvas.height/2 - height/2, width, height);
+
+      //sentcard
+      shadoWrapper('black', 2, 6, () => {
+        ctx.drawImage(cards, 1+cdWidth*(cardOnBoard%14), 1+cdHeight*Math.floor(cardOnBoard/14), cdWidth, cdHeight, canvas.width/2-cdWidth/4, canvas.height/2-cdHeight/4, cdWidth/2, cdHeight/2);
+      })
+      unoButton()
+
       let hoverShadowIntensity = 1
       let hoverShadowColor = "#555555"
       if (hovering == 999){
         hover = true
-        shadowIntensity = 10
+        hovershadowIntensity = 10
         hoverShadowColor = "black"
       }
 
@@ -638,12 +650,16 @@ function animate(){
         
       for (let i = 4; i >= 0; i--)
         shadoWrapper( "#555555", 1, 1, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, 3*canvas.width/4-cdWidth/4+i, canvas.height/2-cdHeight/4 + i, cdWidth/2, cdHeight/2)});
-      shadoWrapper(hoverShadowColor, hoverShadowIntensity, 1+30*hover, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, 3*canvas.width/4-cdWidth/4 - 20*hover, canvas.height/2-cdHeight/4 - 20*hover, cdWidth/2, cdHeight/2)});
+      
+      rotateWrapperForDrawCard(-15*hover, () => {
+        shadoWrapper(hoverShadowColor, hoverShadowIntensity, 1+30*hover, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, -cdWidth/4 - 20*hover, -cdHeight/4 + 20*hover, cdWidth/2, cdHeight/2)});
+      })
       hover = false
 
+      ctx.fillStyle = 'white';
       ctx.font = 'normal bold 50px sans-serif';
       ctx.fillText(playerName, canvas.width/2, canvas.height - 25);
-      // addButton("Arrange", 3*canvas.width/4, canvas.height - 25)
+
       //Hand on screen
       arrangeHand()
       for (let i = 0; i < hand.length; i++) {
@@ -671,11 +687,6 @@ function animate(){
         )});
         hover = false;
       }
-      //sentcard
-      shadoWrapper('black', 2, 6, () => {
-        ctx.drawImage(cards, 1+cdWidth*(cardOnBoard%14), 1+cdHeight*Math.floor(cardOnBoard/14), cdWidth, cdHeight, canvas.width/2-cdWidth/4, canvas.height/2-cdHeight/4, cdWidth/2, cdHeight/2);
-      })
-      unoButton()
 
       if (mode == 'colorpick'){
         chooseColor()

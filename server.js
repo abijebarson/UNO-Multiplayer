@@ -59,7 +59,7 @@ function startGame() {
   console.log('>> Requesting game...');
   let playerids = data.playerids 
   let people = data.playerids.length;
-  console.log(data.playerids)
+  console.log('>> Playerids during game start: ', data.playerids)
   console.log('People count : ' + io.engine.clientsCount + '==' + people)
   // try {
   //   people = io.engine.clientsCount
@@ -73,7 +73,9 @@ function startGame() {
     console.log(">> With Players: ", playerids)
     for (let i = 0; i < people; i++) {
       let playerName = io.sockets.sockets.get(playerids[i]).playerName;
+      console.log('Player order: ' + playerName + ' ' + i )
       players[playerids[i]].name = playerName;
+      players[playerids[i]].order = i;
       console.log('>> Created '  + playerName +' (' + playerids[i] + ') is Player ' + i);
     }
     
@@ -143,8 +145,6 @@ function startGame() {
         } else if (cardType(cardOnBoard) === 'Skip') {
           data['turn'] = data["playerids"][(dealer + 2) % people];
         }
-        
-        console.log(data['turn'])
         console.log('>> Turn is for ' + players[data['turn']].name);
         console.log('>> Reverse (' + (!!data['reverse']) + ')');
         
@@ -173,6 +173,8 @@ function startGame() {
       players[playerid]['name'] = playerName 
       players[playerid]['hand'] = [] 
       players[playerid]['ready'] = false
+      players[playerid]['discon_turn'] = null
+      players[playerid]['order'] = 0
       players[playerid]['unoclaim'] = false
       io.emit('joiningGame', 'success');
       data.playerids.push(socket.id)
@@ -211,14 +213,29 @@ function startGame() {
       players[socket.id] = {...disconplayers[resumeid]}
       delete disconplayers[resumeid]
       players[socket.id].ready = true
-      players[socket.id].unoclaim = false
+      // players[socket.id].unoclaim = false
       socket.playerName = players[socket.id].name
       console.log(io.sockets.sockets.get(socket.id).playerName)
       data.playerids.push(socket.id)
+      console.log('>>>>>>>>>>> ', data.playerids)
+      reorderPlayers()
+      console.log('>>>>>>>>>>> ', data.playerids)
       // console.log(socket.playerName)
+      // console.log('getting back the turn', players[socket.id].discon_turn)
+      if (players[socket.id].discon_turn){
+        console.log('getting back the turn')
+        data.turn = socket.id
+        io.emit('turnPlayer', data['turn']);
+      }
+      players[socket.id].discon_turn = null
       io.to(socket.id).emit('recoveryFeedback', ['success', players[socket.id]])
       io.emit('broadcastmsg', players[socket.id].name + " reconnected.")
       io.emit('sendCard', data['cardOnBoard']);
+      if (!data.wildcolor){
+        io.emit('changeColor', baseColors[cardColor(data['cardOnBoard'])]);
+      }else{
+        io.emit('changeColor', baseColors[data['wildcolor']]);
+      }
       console.log("PLAYERS: ", players)
       console.log("DISCONPLAYERS: ", disconplayers)
       console.log('playerids: ', data.playerids)
@@ -258,6 +275,7 @@ function startGame() {
     console.log('>> Disconnected reason: ', reason);
     if (socket.id == data.turn){
       data.turn = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length]
+      players[socket.id].discon_turn = data.turn
       io.emit('turnPlayer', data['turn']);
     }
     if (data.playing && data.playerids.length > 1){
@@ -570,4 +588,17 @@ function drawCards(id, numCards){
   }
   io.to(id).emit('haveCard', [players[id]['hand'], newcards]);
   return newcards
+}
+
+function reorderPlayers(){
+  let tempid;
+  for(let i = 0; i < data.playerids.length; i++){
+    for (let j = i; j < data.playerids.length; j++){
+      if (players[data.playerids[j]].order < players[data.playerids[i]].order){
+        tempid = data.playerids[j]
+        data.playerids[j] = data.playerids[i]
+        data.playerids[i] = tempid
+      }
+    }
+  }
 }
