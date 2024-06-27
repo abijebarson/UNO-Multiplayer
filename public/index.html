@@ -1,0 +1,85 @@
+<!DOCTYPE HTML>
+<html lang="en">
+  <head>
+     <meta charset="UTF-8">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg" href="images/uno.svg">
+    <title>UNO</title>
+  </head>
+  <body>
+    <table style=" border-collapse: collapse;"><tr vertical-align="top">
+      <td style="padding: 0;  margin: 0;">
+        <canvas id="mainCanvas" width="1100" height="700"></canvas>
+      </td>
+      <td>
+        <table id="playertable" style="
+          width: 400px;
+          color: aliceblue;
+          font-size: 20pt;
+          margin-top: 0%;
+          visibility: visible;
+          text-align: center;
+          ">
+          <tr style="background-color: black;">
+            <th>Player  </th>
+            <th>Cards Left</th>
+          </tr>
+        </table> 
+      </td>
+    </tr>
+
+    
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
+    <!-- <script src="/socket.io/socket.io.js"></script> -->
+    <script src="/main.js"></script>
+  </body>
+</html>
+    <!-- <div
+        id="nameformdiv"
+        style="
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
+          left: 0;
+          visibility: hidden;
+        "
+      >
+        <form id="usernameForm">
+          <div>
+            <input
+              id="usernameInput"
+              type="text"
+              placeholder="Username"
+              style="
+                padding: 12px;
+                border-radius: 20px;
+                border: none;
+                background: #475569;
+                color: #cbd5e1;
+              "
+            />
+          </div>
+          <div style="text-align: center; margin-top: 8px">
+            <button
+              style="
+                padding: 8px 20px;
+                border-radius: 100px;
+                border: none;
+                background-image: linear-gradient(
+                  to right,
+                  rgb(195, 6, 212),
+                  rgb(59, 90, 246)
+                );
+                color: white;
+                cursor: pointer;
+              "
+            >
+              Start!
+            </button>
+          </div>
+        </form>
+      </div> -->
