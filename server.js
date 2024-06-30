@@ -641,11 +641,13 @@ function startGame() {
   })
 
   setInterval(() => {
-    if(!data.playerids.length){
+    if(!data.playerids.length && data.playing){
       io.emit('gameStateChange', 'preround')
       data.playing = false
       allinit()
       // return
+    } else {
+      return
     }
     for(let i=0; i < data.spectatorids.length && data.playing; i++){
       let spectatorid = data.spectatorids[i]
