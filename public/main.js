@@ -11,26 +11,34 @@ const fps = 10;
 let ingame = false;
 let hand = [];
 let newcards = null;
-let turn;
 let playerName;
 let playerID;
 let resumeid;
-let player_num;
 let playerready = false;
 let unoclaim = false;
+let spectateready = false;
+
+let spectatingid = null
+let spectatingName = ""
+let spectunoclaim = false
+let specthand = []
+// let myspectators = []
 
 let mode = 'preround'
 //INFO
 let people = 0
 let maxPeople = 10
 let allPlayerNames = []
+let allSpectatorNames = []
 let noOfCards = []
 let currentTurnArray = [] 
+let allPlayerReady = []
+let allPlayerPlaces = []
 
 let hovering = -1
 let hover = false;
 let chosencolor = null
-let winner = null;
+let winnerTxt = null;
 
 let cardOnBoard;
 let cobColor;
@@ -50,6 +58,9 @@ let baseColors = {
 }
 let themecolors = ['#55aa55', '#cc4343']
 
+let showPassButton = false
+
+let options = {}
 
 function init() {
   ctx.font = "12px Arial";
@@ -67,9 +78,21 @@ function init() {
   document.addEventListener('touchmove', onMouseMove, false);
   document.addEventListener('touchstart', onMouseMove, false);
 
+  document.getElementById('playertable').style.visibility = 'visible'
+  document.getElementById('playertable').style.width = `${window.innerWidth - canvas.width}px`
+  document.getElementById('playertable').getElementsByTagName('th')[2].style.display = 'none'
   for (let id = 0; id < 30; id++){
     let myhtmlrow = document.getElementById('playertable').insertRow(-1)
-    myhtmlrow.setAttribute("id", "r"+id)
+    myhtmlrow.setAttribute("id", 'r'+id)
+    myhtmlrow.insertCell(0)
+    myhtmlrow.insertCell(1)
+    myhtmlrow.insertCell(2).style.display = 'none'
+  }
+  document.getElementById('spectatortable').style.visibility = 'visible'
+  document.getElementById('spectatortable').style.width = `${window.innerWidth - canvas.width}px`
+  for (let id = 0; id < 30; id++){
+    let myhtmlrow = document.getElementById('spectatortable').insertRow(-1)
+    myhtmlrow.setAttribute("id", 's'+id)
     myhtmlrow.insertCell(0)
     myhtmlrow.insertCell(1)
   }
@@ -131,10 +154,13 @@ socket.on('recoveryFeedback', (response) => {
     playerID = socket.id
     mode = 'play'
     setCookie('resumeid', socket.id, 10 * 60);
+    if (response[1].player_type == 'spectator'){
+      mode = 'spectate'
+      spectateready = true
+    }
   }else{
     socket.emit('requestNewGame', playerName);
     hand = [];
-    turn = false;
     console.log('>> Game Request', playerName);
     mode = 'preround'
   }
@@ -157,17 +183,31 @@ socket.on('joiningGame', function (response) {
 
 socket.on('gameStateChange', function(state) {
   mode = state;
+  if (spectateready && mode === 'play') {
+    mode = 'spectate'
+  }
+  if (mode === 'spectate'){
+    spectateready = true
+  }
 });
+
+socket.on('serverForceRefresh', () => {
+  location.reload()
+})
 
 socket.on('anounceWinner', function(w) {
   mode = 'win';
-  winner = w
+  winnerTxt = w
 });
 
 socket.on('playerDisconnect', function() {
   //ctx.clearRect(0, 0, canvas.width, canvas.height);
   setCookie('resumeid', socket.id, 10 * 60);
   console.log('<< Player disconnected');
+});
+
+socket.on('setPassButton', (show) => {
+  showPassButton = show;
 });
 
 function cardColor(num) {
@@ -224,13 +264,27 @@ function onMouseClick(e) {
   const Y = e.pageY - offsetY;
   
   
-  if ((mode === "preround" || mode === "win") && (Y >= (canvas.height/2)+50) && (Y <= (canvas.height/2)+100) && (X >= canvas.width/2 - 50) && (X <= (canvas.width / 2)+50)){
-    // canvas.width / 2 - 50, canvas.height / 2 + 50, 100, 50
-    socket.emit('readypressed', playerName);
-    playerready = true;
-    // console.log('inside')
+  if (mode === "preround" || mode === "win"){
+    //READY BUTTON
+    if  ((Y >= (canvas.height/2)+50) && (Y <= (canvas.height/2)+100) && (X >= canvas.width/2 - 175) && (X <= (canvas.width / 2) - 25)){
+      playerready = !playerready
+      spectateready = false
+      socket.emit('readyspectatepressed', {ready: playerready, spectate:spectateready});
+    }
+    //SPECTATE BUTTON
+    if  ((Y >= (canvas.height/2)+50) && (Y <= (canvas.height/2)+100) && (X >= canvas.width/2 + 25) && (X <= (canvas.width / 2) + 175)){
+      spectateready = !spectateready
+      playerready = false
+      socket.emit('readyspectatepressed', {ready: playerready, spectate:spectateready});
+    }
     return;
   } else if (mode == "play"){
+    /// PASS BUTTON///
+    if (showPassButton && (X >= 7*canvas.width/8 - 50) && (X <= 7*canvas.width/8+50) && (Y >= (canvas.height/2)-25) && (Y <= (canvas.height/2)+25)){
+      socket.emit('passTurn')
+    }
+
+    /// HAND CARDS ///
     let lastCard = (hand.length/112)*(cdWidth/3)+(canvas.width/(2+(hand.length-1)))*(hand.length)-(cdWidth/4)+cdWidth/2;
     let initCard = 2 + (hand.length/112)*(cdWidth/3)+(canvas.width/(2+(hand.length-1)))-(cdWidth/4);
     
@@ -247,14 +301,15 @@ function onMouseClick(e) {
     } else if (X >= 3*canvas.width/4-cdWidth/4 &&  X <= 3*canvas.width/4+cdWidth/4 &&
       Y >= canvas.height/2-cdHeight/4 && Y <= canvas.height/2+cdHeight/4) {
         socket.emit('drawCard');
-      }
-      
-      let cx = canvas.width / 4;
-      let cy = canvas.height / 2;
-      let r = cdHeight / 8;
-      if ((X-cx)*(X-cx) + (Y-cy)*(Y-cy) <= r*r){
-        socket.emit('claimUNO')
-      }
+    }
+    
+    /// UNO BUTTON ///
+    let cx = canvas.width / 4;
+    let cy = canvas.height / 2;
+    let r = cdHeight / 8;
+    if ((X-cx)*(X-cx) + (Y-cy)*(Y-cy) <= r*r){
+      socket.emit('claimUNO')
+    }
   } else if (mode == "colorpick"){
     let cx = canvas.width / 2;
     let cy = canvas.height / 2;
@@ -270,6 +325,14 @@ function onMouseClick(e) {
       } else if ((X-cx) < 0 && (Y-cy) < 0){
         chosencolor = 'green'
       }
+    }
+  } else if (mode == "spectate") {
+    // makeButton("<", '#cc4343', 70, 70, 70, 70, 5, 10)
+    // makeButton(">", '#cc4343', canvas.width - 70, 70, 70, 70, 5, 10)
+    if (X >= 35 && X <= 105 && Y >= 35 && Y <= 105 ){
+      socket.emit("changeSpectating", "<")
+    }else if (X >= canvas.width - 105 && X <= canvas.width - 35 && Y >= 35 && Y <= 105 ){
+      socket.emit("changeSpectating", ">")
     }
   }
 }
@@ -309,9 +372,9 @@ function onMouseMove (e) {
       }
     }
   } else if (X >= 3*canvas.width/4-cdWidth/4 &&  X <= 3*canvas.width/4+cdWidth/4 &&
-    Y >= canvas.height/2-cdHeight/4 && Y <= canvas.height/2+cdHeight/4) {
+    Y >= canvas.height/2-cdHeight/4 && Y <= canvas.height/2+cdHeight/4 && mode == 'play') {
       hovering = 999
-  } else if ((X-cx)*(X-cx) + (Y-cy)*(Y-cy) <= r*r){
+  } else if ((X-cx)*(X-cx) + (Y-cy)*(Y-cy) <= r*r && mode == 'play'){
     hovering = 998
   }else{
     hovering = -1
@@ -320,11 +383,9 @@ function onMouseMove (e) {
 
 socket.on('turnPlayer', function(cur_id) {
   if (cur_id === socket.id) {
-    turn = true;
     console.log('<< Your turn');
     turnmsg = "Your turn"
   } else {
-    turn = false;
     console.log('<< Not your turn');
     turnmsg = ""
   }
@@ -342,27 +403,30 @@ socket.on('sendCard', function(num) {
   cobNumber = cardType(num%14)
 });
 
-socket.on('getreadyfornewgame', () => {
-  hand = [];
-  turn;
-  playerName;
-  playerID;
-  player_num;
-  playerready = false;
-  playerready = false
-  people = 0
-  allPlayerNames = []
-  noOfCards = []
-  currentTurnArray = [] 
-});
-
 socket.on('responseInfo', (res)=>{
   people = res.people
   maxPeople = res.maxPeople
   allPlayerNames = res.playernames
+   res.playerspectatees
   noOfCards = res.nofcards
   currentTurnArray = res.curturn
   unoclaim = res.unoclm
+  allPlayerReady = res.readyArr
+  allPlayerPlaces = res.playerplaces
+
+  allSpectatorNames = res.spectatornames
+  allSpectatings = res.spectatings
+  // console.log(res)
+})
+
+socket.on('giveSpectateData', (spectateData) => {
+  spectatingid = spectateData.id
+  spectatingName = spectateData.name
+  specthand = spectateData.hand
+  cardOnBoard = spectateData.cardOnBoard
+  cobColor = spectateData.cobColor
+  spectunoclaim = spectateData.spectunoclaim
+  hovering = spectateData.hovering
 })
 
 socket.on('broadcastmsg', (msg)=>{
@@ -376,6 +440,10 @@ socket.on('changeColor', (color) => {
   canvas.style.backgroundColor = color[0]
   document.body.style.backgroundColor = color[1] 
   // document.style.backgroundColor = color[1] 
+})
+
+socket.on('setOptions', (optns) => {
+    options = {...optns}
 })
 
 function debugArea(x1, x2, y1, y2) {
@@ -426,6 +494,7 @@ function chooseColor() {
 }
 
 function unoButton() {
+  let claim = unoclaim || spectunoclaim
   
   let cx = canvas.width / 4;
   let cy = canvas.height / 2;
@@ -448,7 +517,7 @@ function unoButton() {
   ctx.stroke()  
   ctx.fillStyle = '#ffddaa';
   ctx.strokeStyle = '#ffddaa';
-  if (unoclaim){
+  if (claim){
     ctx.fillStyle = 'white';
     ctx.strokeStyle = 'white';
   }
@@ -479,23 +548,26 @@ function dialog(text) {
   })
   }
 
-function arrangeHand(){
+function arrangeHand(arrhand){
   let ccards = []
   for (let i = 0; i < 4; i++){
-    ccards = ccards.concat(hand.filter(card => ((card%14)!==13 && (card >= (i+4)*14) && (card < (i+5)*14))||((card%14)!==13 && (card >= i*14) && (card < (i+1)*14))).sort((a, b) => a%56 - b%56))
+    ccards = ccards.concat(arrhand.filter(card => ((card%14)!==13 && (card >= (i+4)*14) && (card < (i+5)*14))||((card%14)!==13 && (card >= i*14) && (card < (i+1)*14))).sort((a, b) => a%56 - b%56))
   }
-  let wcards = hand.filter(card => (card%14)===13).sort((a, b) => a - b);
-  hand = ccards.concat(wcards)
+  let wcards = arrhand.filter(card => (card%14)===13).sort((a, b) => a - b);
+  arrhand = ccards.concat(wcards)
+  return arrhand
 }
 
-function addButton(buttonText, x, y){
-  ctx.fillStyle = '#ff3333'
-  ctx.fillRect(x, y, 100, 50);
-  ctx.strokeStyle = 'white'
-  ctx.strokeRect(x, y, 100, 50);
-  ctx.font = 'normal bold 50px sans-serif';
+// '#cc4343'
+function makeButton(text, color, x=canvas.width/2, y = canvas.height/2, w=100, h=50, shadInt=5, shadBlur=10){
+  ctx.fillStyle = color;
+  shadoWrapper('black', shadInt, shadBlur, () => {
+    ctx.fillRect(x - w/2, y - h/2, w, h);
+  })      
+  ctx.font = 'normal bold 25px sans-serif';
   ctx.fillStyle = 'white';
-  ctx.fillText(buttonText, canvas.width / 2, canvas.height / 2 + 75);
+  ctx.fillText(text, x, y);
+
 }
 
 function game_broadcast() {
@@ -520,6 +592,8 @@ function game_broadcast() {
     ctx.fillText(prevprevmsg, canvas.width/2, 110);
   })
   
+  
+
   if (turnmsg !== ""){
     ctx.fillStyle = baseColors[Object.keys(baseColors)[(Object.keys(baseColors).indexOf(cobColor)+3)%5]][0]
     shadoWrapper('black', 10, 50, () => {
@@ -530,7 +604,18 @@ function game_broadcast() {
     shadoWrapper('black', 10, 40, () => {
       ctx.fillText(turnmsg, canvas.width/2, 35);
     })
+  } else if (spectateready){
+    ctx.fillStyle = baseColors[Object.keys(baseColors)[(Object.keys(baseColors).indexOf(cobColor)+3)%5]][0]
+    shadoWrapper('black', 10, 50, () => {
+      ctx.fillRect(0, 0, canvas.width, 70);
+    })
+    ctx.font = 'normal bold 35px sans-serif';
+    ctx.fillStyle = 'white';
+    shadoWrapper('black', 10, 40, () => {
+      ctx.fillText(`Spectating: ${spectatingName}`, canvas.width/2, 35);
+    })
   }
+
 }
 
 function shadoWrapper(color, intensity, blur, func){
@@ -585,26 +670,54 @@ function animate(){
     if (ingame){
       socket.emit("requestInfo")
     }
+    // console.log(options)
+    if(!options.onewin){
+      document.getElementById('playertable').getElementsByTagName('th')[2].style.display = 'block'
+    }else{
+      document.getElementById('playertable').getElementsByTagName('th')[2].style.display = 'none'
+    }
     for (let i = 0; i < maxPeople; i++){
       let myhtmlrow = document.getElementById('r'+i)
       let Cells = myhtmlrow.getElementsByTagName("td"); 
       if (allPlayerNames[i]){
         Cells[0].innerHTML = allPlayerNames[i]
         Cells[1].innerHTML = noOfCards[i]
+        if(!options.onewin){
+          Cells[2].style.display = 'block'
+        }else{
+          Cells[2].style.display = 'none'
+        }
+        Cells[2].innerHTML = allPlayerPlaces[i]
         myhtmlrow.style.color = 'white'
         if (currentTurnArray[i]){
           myhtmlrow.style.color = 'black'
           myhtmlrow.style.backgroundColor = "white"
         } else if (noOfCards[i] == 1){
-          myhtmlrow.style.backgroundColor = "#55aa55"
-        } else if (noOfCards[i] == 2){
+          myhtmlrow.style.backgroundColor = "#aa5555"
+        } else if (noOfCards[i] == 2 || allPlayerReady[i]){
           myhtmlrow.style.backgroundColor = "#55aa55"
         } else {
           myhtmlrow.style.backgroundColor = "#555555"
         }
+        if (spectatingName == allPlayerNames[i]){
+          myhtmlrow.style.color = 'white'
+          myhtmlrow.style.backgroundColor = "#5555aa"
+        }
       } else {
         Cells[0].innerHTML = ""
         Cells[1].innerHTML = ""
+        Cells[2].innerHTML = ""
+      }
+      let myhtmlsrow = document.getElementById('s'+i)
+      let sCells = myhtmlsrow.getElementsByTagName("td"); 
+      if (allSpectatorNames[i]){
+        sCells[0].innerHTML = allSpectatorNames[i]
+        sCells[1].innerHTML = allSpectatings[i]
+        myhtmlsrow.style.color = 'white'
+        myhtmlsrow.style.backgroundColor = "#555555"
+      } else {
+        sCells[0].innerHTML = ""
+        sCells[1].innerHTML = ""
       }
     }
 
@@ -615,22 +728,20 @@ function animate(){
       dialog('Waiting for Players (' + people +'/' + maxPeople + ')');
       
       if (!playerready){
-        ctx.fillStyle = '#cc4343';
-        shadoWrapper('black', 5, 10, () => {
-          ctx.fillRect(canvas.width / 2 - 50, canvas.height / 2 + 50, 100, 50);
-        })      
-        ctx.fillStyle = 'white';
-        ctx.fillText("Ready?", canvas.width / 2, canvas.height / 2 + 75);
+        makeButton("Ready?", '#cc4343', canvas.width/2 - 102, canvas.height/2 + 73, 150, 50, 5, 10)
       } else {
-        ctx.fillStyle = '#3b763b';
-      shadoWrapper('black', 1, 10, () => {
-        ctx.fillRect(canvas.width / 2 - 50, canvas.height / 2 + 50, 100, 50);
-      })      
-        ctx.fillStyle = 'white';
-          ctx.fillText("Ready!", canvas.width / 2, canvas.height / 2 + 75);
-        }
+        makeButton("Ready!", '#3b763b', canvas.width/2 - 100, canvas.height/2 + 75, 150, 50, 1, 5)
+      }
+
+      if (!spectateready){
+        makeButton("Spectate?", '#cc4343', canvas.width/2 + 102, canvas.height/2 + 73, 150, 50, 5, 10)
+      } else {
+        makeButton("Spectate.", '#3b763b', canvas.width/2 + 100, canvas.height/2 + 75, 150, 50, 1, 5)
+      }
+      
     } else if((mode == 'play' || mode == 'colorpick') && ingame){
-      game_broadcast()
+      game_broadcast()  
+      socket.emit('hoveringData', hovering)
 
       //sentcard
       shadoWrapper('black', 2, 6, () => {
@@ -656,12 +767,9 @@ function animate(){
       })
       hover = false
 
-      ctx.fillStyle = 'white';
-      ctx.font = 'normal bold 50px sans-serif';
-      ctx.fillText(playerName, canvas.width/2, canvas.height - 25);
-
+      
       //Hand on screen
-      arrangeHand()
+      hand = arrangeHand(hand)
       for (let i = 0; i < hand.length; i++) {
         hoverShadowColor = "black"
         if (newcards && newcards.includes(hand[i])){
@@ -687,6 +795,16 @@ function animate(){
         )});
         hover = false;
       }
+      
+      //BELOW THE HAND
+      ctx.fillStyle = 'white';
+      ctx.font = 'normal bold 50px sans-serif';
+      ctx.fillText(playerName, canvas.width/2, canvas.height - 25);
+      if (showPassButton){
+        makeButton("Pass", '#cc4343', 7*canvas.width/8, canvas.height/2, 100, 50, 5, 10)
+      } else {
+        makeButton("Pass", '#555555', 7*canvas.width/8, canvas.height/2, 100, 50, 1, 5)
+      }
 
       if (mode == 'colorpick'){
         chooseColor()
@@ -697,23 +815,99 @@ function animate(){
           mode = 'play'
         }
       }
-    } else if(mode == 'win'){
-      dialog(winner+ " won this round! Play another round?")
-      if (!playerready){
-        ctx.fillStyle = '#cc4343';
-        ctx.fillRect(canvas.width / 2 - 50, canvas.height / 2 + 50, 100, 50);
-        ctx.fillStyle = 'white';
-        ctx.fillText("Ready?", canvas.width / 2, canvas.height / 2 + 75);
+
+    } else if(mode == 'spectate'){
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      /////////////////////////                    SPECTATING                   //////////////////////////////////
+      ///////////////////////////////////////////////  IS   //////////////////////////////////////////////////////
+      ///////////////////////////////////////////     HERE      //////////////////////////////////////////////////
+      ////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+      // socket.emit('getSpectateDataCtoS')
+      game_broadcast()
+      
+      //sentcard
+      shadoWrapper('black', 2, 6, () => {
+        ctx.drawImage(cards, 1+cdWidth*(cardOnBoard%14), 1+cdHeight*Math.floor(cardOnBoard/14), cdWidth, cdHeight, canvas.width/2-cdWidth/4, canvas.height/2-cdHeight/4, cdWidth/2, cdHeight/2);
+      })
+      unoButton()
+      
+      let hoverShadowIntensity = 1
+      let hoverShadowColor = "#555555"
+      if (hovering == 999){
+        hover = true
+        hovershadowIntensity = 10
+        hoverShadowColor = "black"
+      }
+      
+      shadoWrapper("black", 3, 9, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, 3*canvas.width/4-cdWidth/4+5, canvas.height/2-cdHeight/4 + 5, cdWidth/2, cdHeight/2)});
+      
+      for (let i = 4; i >= 0; i--)
+        shadoWrapper( "#555555", 1, 1, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, 3*canvas.width/4-cdWidth/4+i, canvas.height/2-cdHeight/4 + i, cdWidth/2, cdHeight/2)});
+      
+      rotateWrapperForDrawCard(-15*hover, () => {
+        shadoWrapper(hoverShadowColor, hoverShadowIntensity, 1+30*hover, () => {ctx.drawImage(back, 0, 0, cdWidth, cdHeight, -cdWidth/4 - 20*hover, -cdHeight/4 + 20*hover, cdWidth/2, cdHeight/2)});
+      })
+      hover = false
+
+      
+      //Hand on screen (SPECTATE)
+      specthand = arrangeHand(specthand)
+      for (let i = 0; i < specthand.length; i++) {
+        hoverShadowColor = "black"
+        if (newcards && newcards.includes(specthand[i])){
+          hoverShadowColor = "white"
+          hover = true
+          setTimeout(() => {
+            newcards = null
+          }, 1000);
+        }
+        if (hovering == i){
+          hover = true
+        }
+        shadoWrapper(hoverShadowColor, 5, 20+20*hover, () => {ctx.drawImage(
+          cards,
+          1+cdWidth*(specthand[i]%14),
+          1+cdHeight*Math.floor(specthand[i]/14),
+          cdWidth,
+          cdHeight,
+          (specthand.length/112)*(cdWidth/3)+(canvas.width/(2+(specthand.length-1)))*(i+1)-(cdWidth/4)  - 10  *hover,
+          canvas.height - cdWidth - canvas.height/100 -20*hover,
+          cdWidth/2,
+          cdHeight/2
+        )});
+        hover = false;
+      }
+      
+      //BELOW THE HAND (SPECTATE)
+      ctx.fillStyle = 'white';
+      ctx.font = 'normal bold 50px sans-serif';
+      ctx.fillText(playerName, canvas.width/2, canvas.height - 25);
+      if (showPassButton){
+        makeButton("Pass", '#cc4343', 7*canvas.width/8, canvas.height/2, 100, 50, 5, 10)
       } else {
-        ctx.fillStyle = '#3b763b';
-        ctx.fillRect(canvas.width / 2 - 50, canvas.height / 2 + 50, 100, 50);
-        ctx.fillStyle = 'white';
-        ctx.fillText("Ready!", canvas.width / 2, canvas.height / 2 + 75);
+        makeButton("Pass", '#555555', 7*canvas.width/8, canvas.height/2, 100, 50, 1, 5)
+      }
+      
+      makeButton("<", '#cc4343', 70, 70, 70, 70, 5, 10)
+      makeButton(">", '#cc4343', canvas.width - 70, 70, 70, 70, 5, 10)
+    }else if(mode == 'win'){
+      dialog(winnerTxt)
+      if (!playerready){
+        makeButton("Ready?", '#cc4343', canvas.width/2 - 102, canvas.height/2 + 73, 150, 50, 5, 10)
+      } else {
+        makeButton("Ready!", '#3b763b', canvas.width/2 - 100, canvas.height/2 + 75, 150, 50, 1, 5)
+      }
+
+      if (!spectateready){
+        makeButton("Spectate?", '#cc4343', canvas.width/2 + 102, canvas.height/2 + 73, 150, 50, 5, 10)
+      } else {
+        makeButton("Spectate.", '#3b763b', canvas.width/2 + 100, canvas.height/2 + 75, 150, 50, 1, 5)
       }
     } else {
-      dialog('Probably the game has already started. Wait for the server to restart the game.');
+      dialog('Please wait or kindly refresh');
     }
-  
+    
   }
 }
 

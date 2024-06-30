@@ -11,7 +11,7 @@ http.listen(port, () => console.log('listening on port ' + port));
 
 const maxPeople = 30;
 const noOfInitHand = 7;
-const minPlayers = 1
+const minPlayers = 2
 
 let cardColors = {
   green: 'Green',
@@ -37,8 +37,9 @@ deck.splice(95, 1); //98
 
 let data = [];
 let players = {}
+let spectators = {}
 let disconplayers = {}
-function init(){
+function gameinit(){
   data['gameid'] = null;
   data['playing'] = false
   data['deck'] = [];
@@ -46,14 +47,37 @@ function init(){
   data['turn'] = 0;
   data['cardOnBoard'] = 0;
   data['wildcolor'] = null
+  data['playerPlaces'] = []
+  data["winnerids"] = []
+  data['competingPlace'] = 1
   discomplayers = {}
+  console.log(">>>>>>>>>>>> Game Init Clear <<<<<<<<<<<<")
 }
+function allinit(){
+  gameinit()
+  data["playerids"] = [...data.playerids, ...data.spectatorids]
+  players = {...players, ...spectators}
+  data.spectatorids = []
+  spectators = {}
+  console.log(">>>>>>>>>>>> All Cleared <<<<<<<<<<<<")
+  for (let i=0; i < data.playerids.length; i++){
+    players[data.playerids[i]].hand = []
+  }
+  // console.table(players)
+  // console.table(spectators)
+}
+data['options'] = {onewin: false, } // CONSECUTIVE DRAW RULE // CLAIM OWNER
+
 data["playerids"] = []
+data["spectatorids"] = []
 players = {}
-init()
+spectators = {}
+
+allinit()
 
 function startGame() {
   io.emit('gameStateChange', 'play')
+  io.emit('setOptions', data.options)
   data.gameid = guidGenerator()
   
   console.log('>> Requesting game...');
@@ -62,22 +86,24 @@ function startGame() {
   console.log('>> Playerids during game start: ', data.playerids)
   console.log('People count : ' + io.engine.clientsCount + '==' + people)
   // try {
-  //   people = io.engine.clientsCount
-  // } catch (e) {
-  //   console.log('>> No people here...');
-  //   return;
-  // }
-
-  if (people >= minPlayers) {
-    console.log('>> Starting: ', data.gameid)
-    console.log(">> With Players: ", playerids)
-    for (let i = 0; i < people; i++) {
-      let playerName = io.sockets.sockets.get(playerids[i]).playerName;
-      console.log('Player order: ' + playerName + ' ' + i )
-      players[playerids[i]].name = playerName;
-      players[playerids[i]].order = i;
-      console.log('>> Created '  + playerName +' (' + playerids[i] + ') is Player ' + i);
-    }
+    //   people = io.engine.clientsCount
+    // } catch (e) {
+      //   console.log('>> No people here...');
+      //   return;
+      // }
+      
+      if (people >= minPlayers) {
+        console.log('>> Starting: ', data.gameid)
+        console.log(">> With Players: ", playerids)
+        for (let i = 0; i < people; i++) {
+          console.log('Player order: ' + players[playerids[i]].name + ' - ' + i )
+          players[playerids[i]].hand = [];
+          players[playerids[i]].order = i;
+          players[playerids[i]].ready = false;
+        }
+        for (let i = 0; i < data.spectatorids.length; i++) {
+          spectators[data.spectatorids[i]].spectating = playerids[0];
+        }
     
     data['turn'] = playerids[0]
     
@@ -171,11 +197,15 @@ function startGame() {
       let playerid = socket.id
       players[playerid] = {}
       players[playerid]['name'] = playerName 
+      players[playerid]['player_type'] = 'player' //player; spectator
       players[playerid]['hand'] = [] 
       players[playerid]['ready'] = false
       players[playerid]['discon_turn'] = null
       players[playerid]['order'] = 0
-      players[playerid]['unoclaim'] = false
+      players[playerid]['place'] = 0
+      // players[playerid]['spectatees'] = [] //those who spectate this player (only for player) -> possibly ignored
+      players[playerid]['spectating'] = null //this spectator's spectatee (only for spectator)
+      players[playerid]['hoveringData'] = null
       io.emit('joiningGame', 'success');
       data.playerids.push(socket.id)
       console.log('>>>>>>>>>>>>>>>>>>> ', data.playerids)
@@ -190,6 +220,25 @@ function startGame() {
       console.log("         DUPLICATE CONNECTION ATTEMPT          ")
       console.log("_______________________________________________")
       return
+    } else if (data.spectatorids.length < maxPeople && data['playing'] && !(data.playerids.includes(socket.id))){
+      let playerid = socket.id
+      players[playerid] = {}
+      players[playerid]['name'] = playerName 
+      players[playerid]['player_type'] = 'spectator' //player; spectator
+      players[playerid]['hand'] = [] 
+      players[playerid]['ready'] = false
+      players[playerid]['discon_turn'] = null
+      players[playerid]['order'] = 0
+      // players[playerid]['spectatees'] = [] //those who spectate this player (only for player) -> possibly ignored
+      players[playerid]['spectating'] = data.playerids[0] //this spectator's spectatee (only for spectator)
+      players[playerid]['hoveringData'] = null
+      io.emit('joiningGame', 'success');
+      data.playerids.push(socket.id)
+      console.log('>>>>>>>>>>>>>>>>>>> ', data.playerids)
+      console.log('>> User ' + socket.playerName + ' connected '  + ' (' + (data.playerids.length) + '/' + maxPeople + ')');
+      console.log("") 
+      console.log("       NEW CONNECTION SUCCESS (SPECTATOR)      ")
+      console.log("_______________________________________________")
     }
     io.to(socket.id).emit('joiningGame', 'error');
     console.log('>> Player tried to join in an unfortunate situation');
@@ -203,23 +252,21 @@ function startGame() {
     console.log("                RECONNECTION                  ")
     console.log("")
     console.log("Recovering player: " + resumeid)
-    console.log('in discomplayer:' + disconplayers[resumeid])
-    if (io.engine.clientsCount <= 1){
+    // console.log('in discomplayer:' + disconplayers[resumeid])
+    if (io.engine.clientsCount <= 1 || data.playerids.length == 0){
       console.log("Only one player. Discarding the current game.")
       io.to(socket.id).emit('recoveryFeedback', ['failed', null])
-      init()
+      data.playing = false
+      allinit()
     }
-    if (resumeid && disconplayers[resumeid] && data.playing){
+    if (resumeid && disconplayers[resumeid] && data.playing && disconplayers[resumeid].player_type == 'player'){
       players[socket.id] = {...disconplayers[resumeid]}
       delete disconplayers[resumeid]
-      players[socket.id].ready = true
-      // players[socket.id].unoclaim = false
+      players[socket.id].unoclaim = false
       socket.playerName = players[socket.id].name
       console.log(io.sockets.sockets.get(socket.id).playerName)
       data.playerids.push(socket.id)
-      console.log('>>>>>>>>>>> ', data.playerids)
       reorderPlayers()
-      console.log('>>>>>>>>>>> ', data.playerids)
       // console.log(socket.playerName)
       // console.log('getting back the turn', players[socket.id].discon_turn)
       if (players[socket.id].discon_turn){
@@ -237,35 +284,89 @@ function startGame() {
         io.emit('changeColor', baseColors[data['wildcolor']]);
       }
       console.log("PLAYERS: ", players)
+      console.log("SPECTATORS: ", spectators)
       console.log("DISCONPLAYERS: ", disconplayers)
       console.log('playerids: ', data.playerids)
+      console.log('spectatorids: ', data.spectatorids)
       console.log("")
       console.log("RECONNECTION SUCCESS")
+      console.log("_______________________________________________")
+      return
+    } else if (resumeid && disconplayers[resumeid] && data.playing && disconplayers[resumeid].player_type == 'spectator'){
+      spectators[socket.id] = {...disconplayers[resumeid]}
+      delete disconplayers[resumeid]
+      socket.playerName = spectators[socket.id].name
+      data.spectatorids.push(socket.id)
+      io.to(socket.id).emit('recoveryFeedback', ['success', spectators[socket.id]])
+      console.log("PLAYERS: ", players)
+      console.log("SPECTATORS: ", spectators)
+      console.log("DISCONPLAYERS: ", disconplayers)
+      console.log('playerids: ', data.playerids)
+      console.log('spectatorids: ', data.spectatorids)
+      console.log("")
+      console.log("RECONNECTION SUCCESS (spectate)")
       console.log("_______________________________________________")
       return
     }
     delete disconplayers[resumeid]    
     io.to(socket.id).emit('recoveryFeedback', ['failed', null])
     console.log("PLAYERS: ", players)
+    console.log("SPECTATORS: ", spectators)
     console.log("DISCONPLAYERS: ", disconplayers)
     console.log('playerids: ', data.playerids)
+    console.log('spectatorids: ', data.spectatorids)
     console.log("")
     console.log("RECONNECTION FAILED")
     console.log("_______________________________________________")
   })
   
-  socket.on('readypressed', function(pname){
-    if(!players[socket.id]){
-      return
-    }
-    players[socket.id].ready = true
-    console.log(data.playerids.length)
+  socket.on('readyspectatepressed', (state) => {
+    if (players[socket.id] && state.ready){
+      players[socket.id].ready = state.ready
+      console.log(data.playerids.length)
+    } else if (spectators[socket.id] && state.ready){
+      players[socket.id] = {...spectators[socket.id]}
+      data.playerids.push(socket.id)
+      delete spectators[socket.id]
+      data.spectatorids = data.spectatorids.filter(id => id !== socket.id)
+      players[socket.id].player_type = 'player'
+      
+      players[socket.id].ready = state.ready
+      console.log(data.playerids.length)
+    } else if (players[socket.id] && state.spectate){
+      players[socket.id].ready = state.ready
+      spectators[socket.id] = {...players[socket.id]}
+      data.spectatorids.push(socket.id)
+      delete players[socket.id]
+      data.playerids = data.playerids.filter(id => id !== socket.id)
+      spectators[socket.id].player_type = 'spectator'
+    } else if (players[socket.id]){
+      players[socket.id].ready = state.ready
+    } else if (spectators[socket.id] && !state.spectate){
+      spectators[socket.id].ready = state.ready
+
+      players[socket.id] = {...spectators[socket.id]}
+      data.playerids.push(socket.id)
+      delete spectators[socket.id]
+      data.spectatorids = data.spectatorids.filter(id => id !== socket.id)
+      players[socket.id].player_type = 'player'
+
+    } else {
+      console.log(">>>>>>>>> SOMETHING WEIRD HAPPENNED <<<<<<<<<")
+    }    
     if (data.playerids.length >= minPlayers && checkReady()) {
-      init()
+      gameinit()
       data['playing'] = true;
       startGame();
     }
-  })
+    console.log("READY/SPECTATE PRESSED >> ", state )
+    console.log("PLAYERS: ", players)
+    console.log("SPECTATORS: ", spectators)
+    console.log("DISCONPLAYERS: ", disconplayers)
+    console.log('playerids: ', data.playerids)
+    console.log('spectatorids: ', data.spectatorids)
+    console.log("")
+  });
   
   socket.on('disconnect', function(reason) {
     console.log("______________________________________________")
@@ -273,33 +374,60 @@ function startGame() {
     console.log("")
     console.log('>> Player ' + socket.playerName + ' ('+ socket.id + ') disconnected');
     console.log('>> Disconnected reason: ', reason);
-    if (socket.id == data.turn){
-      data.turn = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length]
-      players[socket.id].discon_turn = data.turn
-      io.emit('turnPlayer', data['turn']);
+    // if (data.playerids.length == 0){ //DO THIS LATER
+    //   console.log("No players left. Discarding the current game.")
+    //   io.to(socket.id).emit('recoveryFeedback', ['failed', null])
+    //   init()
+    // }
+    if (data.playerids.length <= 1){
+      io.emit('gameStateChange', 'preround')
+      data.playing = false
+      allinit()
     }
-    if (data.playing && data.playerids.length > 1){
-      console.log(">> Saving playerinfo")
-      disconplayers[socket.id] = {...players[socket.id]}
-      if (players[socket.id]){
-        io.emit('broadcastmsg', players[socket.id].name + " disconnected.")
+    if (players[socket.id]){
+      if (socket.id == data.turn){
+        data.turn = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length]
+        players[socket.id].discon_turn = data.turn
+        io.emit('turnPlayer', data['turn']);
       }
+      for (let i = 0; i < data.spectatorids.length; i++){
+        if (socket.id == spectators[data.spectatorids[i]].spectating){
+          spectators[data.spectatorids[i]].spectating = data.playerids[(data.playerids.length + data["playerids"].indexOf(spectators[data.spectatorids[i]].spectating) + 1) % data.playerids.length];
+        }
+      }
+      if (data.playing && data.playerids.length > 1){
+        console.log(">> Saving playerinfo ...")
+        disconplayers[socket.id] = {...players[socket.id]}
+        if (players[socket.id]){
+          io.emit('broadcastmsg', players[socket.id].name + " disconnected.")
+        }
+      }
+      delete players[socket.id]
+      data.playerids = data.playerids.filter(id => id !== socket.id)
+    } else if (spectators[socket.id]) {
+      console.log(">> Saving playerinfo (spectator) ...")
+      disconplayers[socket.id] = {...spectators[socket.id]}
+      delete spectators[socket.id]
+      data.spectatorids = data.spectatorids.filter(id => id !== socket.id)
     }
-    console.log("test print", players[socket.id])
-    delete players[socket.id]
-    console.log("test print", players[socket.id])
-    data.playerids = data.playerids.filter(id => id !== socket.id)
     console.log("PLAYERS: ", players)
+    console.log("SPECTATORS: ", spectators)
     console.log("DISCONPLAYERS: ", disconplayers)
     console.log('playerids: ', data.playerids)
+    console.log('spectatorids: ', data.spectatorids)
     console.log("")
     console.log("")
     console.log("______________________________________________")
   });
   
   socket.on('claimUNO', () => {
-    io.emit('broadcastmsg', players[socket.id].name + " DID UNO!!! 1 step away from winning!")
-    players[socket.id].unoclaim = true;
+    players[socket.id].unoclaim = !players[socket.id].unoclaim;
+    if (players[socket.id].unoclaim){ 
+      io.emit('broadcastmsg', players[socket.id].name + " DID UNO!!! 1 step away from winning!")
+    }
+    else {
+      io.emit('broadcastmsg', players[socket.id].name + " REVOKES CLAIMING UNO")
+    }
   })
   
   socket.on('drawCard', function() {
@@ -317,12 +445,21 @@ function startGame() {
       io.emit('broadcastmsg', players[socket.id].name + ' draws a card from the deck')
       if(!isPlayable(card)){
         data['turn'] = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length];
+      }else{
+        io.to(socket.id).emit('setPassButton', true);
       }
       io.emit('turnPlayer', data['turn']);
     }
   });
   
+  socket.on('passTurn', () => {
+    data['turn'] = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length];
+    io.emit('turnPlayer', data['turn']);
+    io.to(socket.id).emit('setPassButton', false);
+  });
+  
   socket.on('playCard', function(res) {
+    io.emit('setPassButton', false);
     
     //EMPTY DECK RESET
     if (data.deck.length <= 4){
@@ -356,9 +493,10 @@ function startGame() {
         }
             io.to(socket.id).emit('haveCard', [handPlayer, null]);
             
-            victimid = data["playerids"][Math.abs(data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse']) % data.playerids.length]
             // Next turn
             let skip = 0;
+            victimid = data.playerids[(data.playerids.length + data["playerids"].indexOf(data['turn']) + (-1) ** data['reverse'] + skip*((-1)**data['reverse'])) % data.playerids.length];
+            // console.log(victimid)
             if (cardType(res) === 'Skip') {
               skip += 1;
             } else if (cardType(res) === 'Reverse') {
@@ -384,7 +522,6 @@ function startGame() {
             io.emit('turnPlayer', data['turn']);
             data.wildcolor = null;
             
-            // console.log("UNOCLAIM CHEKC:", players[socket.id].hand.length == 1, !players[socket.id].unoclaim)
             if (players[socket.id].hand.length == 1 && !players[socket.id].unoclaim){
               card = drawCards(socket.id, 1)
               console.log('>> ' + players[socket.id].name +' draws ' + cardType(card) + ' ' + cardColor(card));
@@ -398,19 +535,28 @@ function startGame() {
               players[socket.id].unoclaim = false
             }
             
-            if (players[socket.id].hand.length == 0){
-              io.emit('anounceWinner', players[socket.id].name)
+            if (players[socket.id].hand.length == 0 && data.options.onewin){
+              io.emit('anounceWinner', players[socket.id].name + " won this round! Play another round?")
               console.log(players[socket.id].name +  " wins this round.")
               data['playing'] = false
-              data['deck'] = [];
-              data['reverse'] = 0;
-              data['turn'] = 0;
-              data['cardOnBoard'] = 0;
-              for (i in data.playerids){
-                players[data.playerids[i]].ready = false
-                players[data.playerids[i]].hand = []
+            } else if (players[socket.id].hand.length == 0 && !data.options.onewin && data.playerids.length > 2){
+              players[socket.id].place = data.competingPlace
+              data.competingPlace++
+              io.emit('broadcastmsg', players[socket.id].name + ' completed at Place ' + players[socket.id].place)
+              convertPlayerToSpectator(socket.id)
+              if (cardType(res) === 'Wild' || cardType(res) === 'Draw4'){
+                let chosencolor = ['blue', 'green', 'yellow', 'red'][(Math.floor(Math.random() * 4))]
+                io.emit('broadcastmsg', "Randomly chosen " + chosencolor + " for wild card")
+                io.emit('changeColor', baseColors[chosencolor]);
+                data.wildcolor = chosencolor
               }
-              io.emit('getreadyfornewgame')
+            } else if (players[socket.id].hand.length == 0 && !data.options.onewin && data.playerids.length <= 2){
+              players[socket.id].place = data.competingPlace
+              io.emit('broadcastmsg', players[socket.id].name + ' completed at Place ' + players[socket.id].place)
+              data.competingPlace++
+              convertPlayerToSpectator(socket.id)
+              io.emit('anounceWinner', "Game Ends. Play another round?")
+              data['playing'] = false
             }
           }
         }
@@ -423,32 +569,103 @@ function startGame() {
   })
         
   socket.on('requestInfo', () => {
-    if (data.playerids.length !== 0){
+    if (data.playerids.length !== 0 || data.spectatorids.length !== 0){
+      if (!data.playerids.length){
+        io.emit('gameStateChange', 'preround')
+        data.playing = false
+        allinit()
+        return
+      }
       let people = data.playerids.length
       let playernames = []
+      // let playerspectatees = []
+      let spectatornames = []
+      let spectatings = []
       let nofcards = []
       let curturn = []
+      let readyArr = []
+      let playerplaces = []
       // console.log(data)
       // console.log(socket.id)
       let unoclm = false
       for (i in data.playerids){
         playernames.push(players[data.playerids[i]].name)
+        // playerspectatees.push(players[data.playerids[i]].spectatees)
         nofcards.push(players[data.playerids[i]].hand.length)
         curturn.push(data.playerids[i] == data.turn)
+        readyArr.push(players[data.playerids[i]].ready)
+        playerplaces.push("")
+      }
+      for (i in data.spectatorids){
+        spectatornames.push(spectators[data.spectatorids[i]].name)
+        if (data.playing && players[spectators[data.spectatorids[i]].spectating]){
+          spectatings.push(players[spectators[data.spectatorids[i]].spectating].name)
+        } else{
+          spectatings.push("")
+        }
+        if(spectators[data.spectatorids[i]].place){
+          playernames.push(spectators[data.spectatorids[i]].name)
+          nofcards.push(0)
+          curturn.push(false)
+          readyArr.push(false)
+          playerplaces.push(spectators[data.spectatorids[i]].place)
+        }
       }
       if (players[socket.id]){
         unoclm = players[socket.id].unoclaim
       } else {
         // console.log('this happened', players[socket.id])
-        return
       }
-      // console.log('info')
-      io.to(socket.id).emit('responseInfo', {people, maxPeople, playernames, nofcards, curturn, unoclm})
+      io.to(socket.id).emit('responseInfo', {people, maxPeople, playernames, playerplaces, nofcards, curturn, unoclm, readyArr, spectatornames, spectatings})
     } else {
       io.emit('gameStateChange', 'preround')
-      data.playing = false;
+      data.playing = false
+      allinit()
     }
   })
+
+  socket.on('hoveringData', (hovering) => {
+    // console.log(players, spectators)
+    if (data.playing){
+      // console.log("Hovering data: ", players[socket.id], socket.id)
+      players[socket.id]["hovering"] = hovering
+    }
+  })
+
+  socket.on("changeSpectating", (direction) => {
+    if (direction === "<"){
+      spectators[socket.id].spectating = data.playerids[(data.playerids.length + data["playerids"].indexOf(spectators[socket.id].spectating) - 1) % data.playerids.length];
+    }else if (direction === ">"){
+      spectators[socket.id].spectating = data.playerids[(data.playerids.length + data["playerids"].indexOf(spectators[socket.id].spectating) + 1) % data.playerids.length];
+    }
+  })
+
+  setInterval(() => {
+    if(!data.playerids.length){
+      io.emit('gameStateChange', 'preround')
+      data.playing = false
+      allinit()
+      // return
+    }
+    for(let i=0; i < data.spectatorids.length && data.playing; i++){
+      let spectatorid = data.spectatorids[i]
+      let spectatingid = spectators[spectatorid].spectating
+      let playerdata = {...players[spectatingid]} 
+      if (!spectators[spectatorid].spectating){
+        spectators[spectatorid].spectating = data.turn
+      }
+      let spectateData = {
+        id: spectatingid,
+        name: playerdata.name,
+        hand: playerdata.hand,
+        cardOnBoard: data.cardOnBoard,
+        cobColor: data.wildcolor ? (data.wildcolor) : cardColor(data.cardOnBoard),
+        unoclaim: playerdata.unoclaim,
+        hovering: playerdata.hovering
+      }
+      io.to(spectatorid).emit('giveSpectateData', spectateData)
+    }
+  }, 100);
 
   setInterval(() => {
     if (!data.playerids.length){
@@ -546,19 +763,6 @@ function checkReady(){
   return ret
 }
 
-function getPlayerIDs(){
-  let tempids = Array.from(io.sockets.adapter.sids.keys())
-  let playerskeys = Object.keys(players)
-  let pids = []
-  for (let i in tempids){
-    if (playerskeys.includes(tempids[i])){
-      pids.push(tempids[i])
-    }
-  }
-  console.log('getPlayerIDs() : ', pids)
-  return pids
-}
-
 function isPlayable(card){
   let cardcolor = cardColor(card)
   let cardnum = card%14
@@ -601,4 +805,14 @@ function reorderPlayers(){
       }
     }
   }
+}
+
+function convertPlayerToSpectator(id){
+  spectators[id] = {...players[id]}
+  data.spectatorids.push(id)
+  delete players[id]
+  data.playerids = data.playerids.filter(nid => nid !== id)
+  spectators[id].player_type = 'spectator'
+  spectators[id].spectating = data.turn
+  io.to(id).emit('gameStateChange', 'spectate')
 }
